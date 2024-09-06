@@ -8,9 +8,13 @@ import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/journal")
@@ -22,8 +26,10 @@ public class JournalEntryController {
     @Autowired
     private UserService userService;
 
-    @GetMapping("{userName}")
-    public ResponseEntity<?> getAllJournalEntriesOfUser(@PathVariable String userName) {
+    @GetMapping
+    public ResponseEntity<?> getAllJournalEntriesOfUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String userName = auth.getName();
         User user = userService.findByUserName(userName);
         List<JournalEntry> all = user.getJournalEntries();
         if (all != null && !all.isEmpty()) {
@@ -32,9 +38,11 @@ public class JournalEntryController {
         return new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
 
-    @PostMapping("{userName}")
-    public ResponseEntity<JournalEntry> createEntry(@RequestBody JournalEntry myEntry, @PathVariable String userName) {
+    @PostMapping
+    public ResponseEntity<JournalEntry> createEntry(@RequestBody JournalEntry myEntry) {
         try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            String userName = auth.getName();
             journalEntryService.saveEntry(myEntry, userName);
             return new ResponseEntity<>(myEntry, HttpStatus.CREATED);
         } catch (Exception e) {
@@ -44,29 +52,50 @@ public class JournalEntryController {
 
     @GetMapping("id/{myId}")
     public ResponseEntity<JournalEntry> getJournalEntryById(@PathVariable ObjectId myId) {
-        Optional<JournalEntry> journalEntry = journalEntryService.findById(myId);
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String userName = auth.getName();
+        User user = userService.findByUserName(userName);
+        List<JournalEntry> collect = user.getJournalEntries().stream().filter(x -> x.getId().equals(myId)).collect(Collectors.toList());
 
-        if (journalEntry.isPresent()) {
-            return new ResponseEntity<>(journalEntry.get(), HttpStatus.OK);
+        if(!collect.isEmpty()){
+            Optional<JournalEntry> journalEntry = journalEntryService.findById(myId);
+            if (journalEntry.isPresent()) {
+                return new ResponseEntity<>(journalEntry.get(), HttpStatus.OK);
+            }
         }
         return new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
 
-    @DeleteMapping("id/{userName}/{myId}")
-    public ResponseEntity<?> deleteJournalEntryById(@PathVariable ObjectId myId, @PathVariable String userName) {
-        journalEntryService.deleteById(myId, userName);
-        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+    @DeleteMapping("id/{myId}")
+    public ResponseEntity<?> deleteJournalEntryById(@PathVariable ObjectId myId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String userName = auth.getName();
+        boolean removed = journalEntryService.deleteById(myId, userName);
+        if(removed) {
+            return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+        } else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
     }
 
-    @PutMapping("id/{userName}/{myId}")
-    public ResponseEntity<?> updateJournalEntryById(@PathVariable ObjectId myId, @RequestBody JournalEntry newValues, @PathVariable String userName) {
-        JournalEntry oldValues = journalEntryService.findById(myId).orElse(null);
+    @PutMapping("id/{myId}")
+    public ResponseEntity<?> updateJournalEntryById(@PathVariable ObjectId myId, @RequestBody JournalEntry newValues) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String userName = auth.getName();
+        User user = userService.findByUserName(userName);
+        List<JournalEntry> collect = user.getJournalEntries().stream().filter(x -> x.getId().equals(myId)).collect(Collectors.toList());
 
-        if (oldValues != null) {
-            oldValues.setTitle(newValues.getTitle() != null && !newValues.getTitle().equals("") ? newValues.getTitle() : oldValues.getTitle());
-            oldValues.setContent(newValues.getContent() != null && !newValues.getContent().equals("") ? newValues.getContent() : oldValues.getContent());
-            journalEntryService.saveEntry(oldValues);
-            return new ResponseEntity<>(oldValues, HttpStatus.OK);
+        if(!collect.isEmpty()){
+            Optional<JournalEntry> journalEntry = journalEntryService.findById(myId);
+            if (journalEntry.isPresent()) {
+                JournalEntry oldValues = journalEntry.get();
+                oldValues.setTitle(newValues.getTitle() != null && !newValues.getTitle().equals("") ? newValues.getTitle() : oldValues.getTitle());
+                oldValues.setContent(newValues.getContent() != null && !newValues.getContent().equals("") ? newValues.getContent() : oldValues.getContent());
+                oldValues.setUpdatedDate(LocalDateTime.now());
+                journalEntryService.saveEntry(oldValues);
+                return new ResponseEntity<>(oldValues, HttpStatus.OK);
+
+            }
         }
         return new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
